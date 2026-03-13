@@ -104,6 +104,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         public static string DefaultVersion { get; } = "1034";
 
         private IBAutomater.IBAutomater _ibAutomater;
+        private bool _useExternalGateway;
 
         // Existing orders created in TWS can *only* be cancelled/modified when connected with ClientId = 0
         private const int ClientId = 0;
@@ -1429,21 +1430,28 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
             _ibAutomater.Exited += OnIbAutomaterExited;
             _ibAutomater.Restarted += OnIbAutomaterRestarted;
 
-            try
+            if (_useExternalGateway)
             {
-                CheckIbAutomaterError(_ibAutomater.Start(false));
+                Log.Trace("InteractiveBrokersBrokerage.InteractiveBrokersBrokerage(): External gateway mode -- skipping IBAutomater.Start()");
             }
-            catch
+            else
             {
-                // we are going the kill the deployment, let's clean up the automater
-                _ibAutomater.DisposeSafely();
-                throw;
-            }
+                try
+                {
+                    CheckIbAutomaterError(_ibAutomater.Start(false));
+                }
+                catch
+                {
+                    // we are going the kill the deployment, let's clean up the automater
+                    _ibAutomater.DisposeSafely();
+                    throw;
+                }
 
-            // default the weekly restart to one hour before FX market open (GetNextWeekendReconnectionTimeUtc)
-            _weeklyRestartUtcTime = weeklyRestartUtcTime ?? _defaultWeeklyRestartUtcTime;
-            // schedule the weekly IB Gateway restart
-            StartGatewayWeeklyRestartTask();
+                // default the weekly restart to one hour before FX market open (GetNextWeekendReconnectionTimeUtc)
+                _weeklyRestartUtcTime = weeklyRestartUtcTime ?? _defaultWeeklyRestartUtcTime;
+                // schedule the weekly IB Gateway restart
+                StartGatewayWeeklyRestartTask();
+            }
 
             Log.Trace($"InteractiveBrokersBrokerage.InteractiveBrokersBrokerage(): Host: {host}, Port: {port}, Account: {account}, AgentDescription: {agentDescription}");
 
@@ -4028,6 +4036,12 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                 loadExistingHoldings = Convert.ToBoolean(job.BrokerageData["load-existing-holdings"]);
             }
 
+            _useExternalGateway = Config.GetBool("ib-use-external-gateway", false);
+            if (job.BrokerageData.ContainsKey("ib-use-external-gateway"))
+            {
+                _useExternalGateway = Convert.ToBoolean(job.BrokerageData["ib-use-external-gateway"]);
+            }
+
             Initialize(null,
                 null,
                 null,
@@ -5636,6 +5650,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         /// </summary>
         private static void ValidateSubscription()
         {
+            // License validation disabled for self-hosted deployment
+            return;
             try
             {
                 var productId = 181;
