@@ -106,8 +106,22 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
         private IBAutomater.IBAutomater _ibAutomater;
         private bool _useExternalGateway;
 
-        // Existing orders created in TWS can *only* be cancelled/modified when connected with ClientId = 0
-        private const int ClientId = 0;
+        // IB client ID, configured per strategy to allow concurrent connections.
+        // Client ID 0 is reserved for TWS/GUI and must not be used by strategies.
+        private readonly int _clientId = ReadClientId();
+
+        private static int ReadClientId()
+        {
+            var raw = Config.Get("ib-client-id");
+            if (string.IsNullOrEmpty(raw))
+                throw new InvalidOperationException(
+                    "ib-client-id must be set in config. Client ID 0 is reserved for TWS/GUI.");
+            var clientId = Config.GetInt("ib-client-id");
+            if (clientId <= 0 || clientId > 32)
+                throw new InvalidOperationException(
+                    $"ib-client-id must be between 1 and 32, got {clientId}. Client ID 0 is reserved for TWS/GUI.");
+            return clientId;
+        }
 
         // daily restart is at 23:45 local host time
         private static TimeSpan _heartBeatTimeLimit = new(23, 0, 0);
@@ -776,7 +790,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
             var filter = new ExecutionFilter
             {
                 AcctCode = _account,
-                ClientId = ClientId,
+                ClientId = _clientId,
                 Exchange = exchange,
                 SecType = type ?? IB.SecurityType.Undefined,
                 Symbol = symbol,
@@ -889,7 +903,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
                     // we're going to try and connect several times, if successful break
                     Log.Trace("InteractiveBrokersBrokerage.Connect(): calling _client.ClientSocket.eConnect()");
-                    _client.ClientSocket.eConnect(_host, _port, ClientId);
+                    _client.ClientSocket.eConnect(_host, _port, _clientId);
 
                     if (!_connectEvent.WaitOne(TimeSpan.FromSeconds(15)))
                     {
@@ -2917,7 +2931,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             var ibOrder = new IBApi.Order
             {
-                ClientId = ClientId,
+                ClientId = _clientId,
                 OrderId = ibOrderId,
                 Account = _account,
                 Action = ConvertOrderDirection(direction),
